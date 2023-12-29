@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
+
+	"github.com/labstack/echo/v4"
 )
 
 type Setter[K comparable, V any] interface {
@@ -19,6 +22,13 @@ type Updater[K comparable, V any] interface {
 
 type Deleter[K comparable, V any] interface {
 	Delete(K) (V, error)
+}
+
+type Storer[K comparable, V any] interface {
+	Setter[K, V]
+	Getter[K, V]
+	Updater[K, V]
+	Deleter[K, V]
 }
 
 type KVStore[K comparable, V any] struct {
@@ -86,11 +96,49 @@ func (s *KVStore[K, V]) Delete(key K) (V, error) {
 	return value, nil
 }
 
-func StoreThings(s Setter[string, int]) error {
-	return s.Set("foo", 1)
+type Server struct {
+	Storage    Storer[string, string]
+	ListenAddr string
+}
+
+func NewServer(listenAddr string) *Server {
+	return &Server{
+		Storage:    InitialiseNewKVStore[string, string](),
+		ListenAddr: listenAddr,
+	}
+}
+
+func (s *Server) handleSet(c echo.Context) error {
+	key := c.Param("key")
+	value := c.Param("value")
+	s.Storage.Set(key, value)
+	return c.JSON(http.StatusOK, map[string]string{"msg": "ok"})
+}
+
+func (s *Server) handleGet(c echo.Context) error {
+	key := c.Param("key")
+	value, err := s.Storage.Get(key)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{key: value})
+}
+
+func (s *Server) Start() {
+	fmt.Printf("HTTP server is running on port %s", s.ListenAddr)
+
+	e := echo.New()
+
+	e.GET("/set/:key/:value", s.handleSet)
+
+	e.GET("/get/:key", s.handleGet)
+
+	e.Start(s.ListenAddr)
 }
 
 func main() {
-	// store := InitialiseNewKVStore[string, string]()
+	s := NewServer(":3000")
 
+	s.Start()
 }
